@@ -1,0 +1,55 @@
+#!/bin/bash
+
+current_user=$(whoami)
+
+# Get a list of users with jobs in the queue
+users=$(squeue -h -o %u | sort -u)
+
+# Create an associative array to store user information
+declare -A user_info
+
+for user in $users; do
+    # Count running jobs for the user
+    running_jobs=$(squeue -u $user -h -t R | wc -l)
+
+    # Count pending jobs for the user
+    pending_jobs=$(squeue -u $user -h -t PD | wc -l)
+
+    # Calculate total jobs for the user
+    total_jobs=$((running_jobs + pending_jobs))
+
+    read total_cpus total_mem <<< $(squeue -h -u $user -t R -o "%A %C %m" --noconvert | awk 'BEGIN { total_cpu=0; total_mem=0; } { total_cpu+=$2; total_mem+=$3; } END { print total_cpu, total_mem; }')
+
+    total_mem=$(echo "scale=2; $total_mem / 1024" | bc)
+
+    # Store user information in the array
+    user_info["$user"]=$total_jobs,$running_jobs,$pending_jobs,$total_cpus,$total_mem
+done
+
+# Display header
+header_color='\e[1m\e[1;32m'  # Bold green for the header
+reset_color='\e[0m'      # Reset color
+printf "${header_color}%-25s %12s %15s %15s %15s %20s${reset_color}\n" "USER" "TOTAL JOBS" "RUNNING JOBS" "PENDING JOBS" "RUNNING CPUS" "RUNNING MEMORY (GB)"
+
+sorted_users=($(for key in "${!user_info[@]}"; do
+    echo "$key,${user_info[$key]}"
+done | sort -t, -k2,2nr -k3,3nr -k4,4nr -k5,5nr | awk -F, '{print $1}'))
+
+# Iterate through all sorted users
+for user in "${sorted_users[@]}"; do
+    # Retrieve user information
+    IFS=',' read -r total_jobs running_jobs pending_jobs total_cpus total_mem <<< "${user_info["$user"]}"
+
+    # Highlight current user in yellow
+    if [ "$user" == "$current_user" ]; then
+        highlight_color='\e[1;33m'  # Yellow color for the logged-in user
+        reset_color='\e[0m'         # Reset color
+    else
+        highlight_color=''
+        reset_color=''
+    fi
+
+    # Display user summary with right alignment
+    printf "${highlight_color}%-25s %12s %15s %15s %15s %20s${reset_color}\n" "$user" "$total_jobs" "$running_jobs" "$pending_jobs" "$total_cpus" "$total_mem"
+done
+
